@@ -1,8 +1,14 @@
 """
-╔══════════════════════════════════════════╗
-║     ADVANCED TELEGRAM SUPPORT BOT       ║
-║     MongoDB + Railway Ready             ║
-╚══════════════════════════════════════════╝
+╔══════════════════════════════════════════════╗
+║        OTPKing Solution Bot                 ║
+║        100% Fixed — Railway + MongoDB       ║
+╚══════════════════════════════════════════════╝
+
+HOW IT WORKS:
+- User message aata hai → Admin ko forward hota hai (bot se)
+- Admin us forwarded message pe REPLY karta hai → Bot user ko bhejta hai
+- Admin ka number kabhi user ko nahi dikhta
+- Sab kuch bot ke through hota hai
 """
 
 import logging
@@ -12,7 +18,6 @@ import os
 import sys
 from datetime import datetime, timezone, timedelta
 
-# ── Telegram ──────────────────────────────
 from telegram import (
     Update,
     InlineKeyboardButton,
@@ -27,30 +32,27 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
-
-# ── MongoDB ───────────────────────────────
 from motor.motor_asyncio import AsyncIOMotorClient
 
-# ═══════════════════════════════════════════
-#   CONFIG  (Railway → Variables tab)
-# ═══════════════════════════════════════════
-BOT_TOKEN  = os.environ.get("BOT_TOKEN",  "").strip()
-ADMIN_ID   = int(os.environ.get("ADMIN_ID",  "0").strip())
-MONGO_URI  = os.environ.get("MONGO_URI",  "").strip()
+# ══════════════════════════════════════════════
+#   CONFIG — Railway Variables Tab mein daalo
+# ══════════════════════════════════════════════
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "").strip()
+ADMIN_ID  = int(os.environ.get("ADMIN_ID", "0").strip())
+MONGO_URI = os.environ.get("MONGO_URI", "").strip()
 
-DB_NAME    = "helpbot"
+DB_NAME    = "otpkingbot"
 MAX_WARN   = 3
-ONLINE_MIN = 5          # minutes
+ONLINE_MIN = 5
 
-# ── Startup check ─────────────────────────
-if not BOT_TOKEN or BOT_TOKEN == "YOUR_BOT_TOKEN":
-    sys.exit("❌ BOT_TOKEN missing! Railway → Variables mein daalo.")
+# ── Startup validation ────────────────────────
+if not BOT_TOKEN:
+    sys.exit("❌ BOT_TOKEN missing in Railway Variables!")
 if ADMIN_ID == 0:
-    sys.exit("❌ ADMIN_ID missing! Railway → Variables mein daalo.")
-if not MONGO_URI or MONGO_URI == "YOUR_MONGODB_URI":
-    sys.exit("❌ MONGO_URI missing! Railway → Variables mein daalo.")
+    sys.exit("❌ ADMIN_ID missing in Railway Variables!")
+if not MONGO_URI:
+    sys.exit("❌ MONGO_URI missing in Railway Variables!")
 
-# ── Logging ───────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s",
@@ -58,9 +60,9 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-# ═══════════════════════════════════════════
+# ══════════════════════════════════════════════
 #   MONGODB
-# ═══════════════════════════════════════════
+# ══════════════════════════════════════════════
 _mongo = None
 db     = None
 
@@ -68,14 +70,14 @@ async def init_db():
     global _mongo, db
     try:
         _mongo = AsyncIOMotorClient(MONGO_URI, serverSelectionTimeoutMS=8000)
-        await _mongo.admin.command("ping")          # connection test
+        await _mongo.admin.command("ping")
         db = _mongo[DB_NAME]
         await db.users.create_index("user_id", unique=True)
         await db.users.create_index("last_seen")
         log.info("✅ MongoDB connected!")
     except Exception as e:
-        log.error(f"❌ MongoDB connect failed: {e}")
-        sys.exit("MongoDB connection fail. URI check karo!")
+        log.error(f"❌ MongoDB failed: {e}")
+        sys.exit("MongoDB connect fail. URI check karo!")
 
 async def get_user(uid: int):
     try:
@@ -105,7 +107,7 @@ async def save_user(tg_user):
     except Exception as e:
         log.warning(f"save_user error: {e}")
 
-async def get_stats() -> dict:
+async def get_stats():
     try:
         threshold = datetime.now(timezone.utc) - timedelta(minutes=ONLINE_MIN)
         total   = await db.users.count_documents({})
@@ -120,9 +122,9 @@ async def get_stats() -> dict:
     except Exception:
         return {"total": 0, "online": 0, "offline": 0, "banned": 0}
 
-# ═══════════════════════════════════════════
+# ══════════════════════════════════════════════
 #   ABUSIVE WORD DETECTION
-# ═══════════════════════════════════════════
+# ══════════════════════════════════════════════
 _BAD = [
     "chutiya","chutiye","bhosdike","bhosdi","madarchod","madarchodd",
     "behenchod","behnchod","randi","harami","haraami","gandu","gaandu",
@@ -141,7 +143,7 @@ def _norm(t: str):
     for k, v in {"@":"a","4":"a","3":"e","1":"i","0":"o",
                  "5":"s","$":"s","7":"t","8":"b"}.items():
         t = t.replace(k, v)
-    t = re.sub(r"[^a-z0-9\s]", "", t)
+    t  = re.sub(r"[^a-z0-9\s]", "", t)
     ns = t.replace(" ", "")
     nd = re.sub(r"(.)\1+", r"\1", ns)
     return ns, nd, t
@@ -176,136 +178,157 @@ def is_gif(update: Update) -> bool:
         or (m.document and m.document.mime_type == "image/gif")
     )
 
-# ═══════════════════════════════════════════
-#   WARNING MESSAGES
-# ═══════════════════════════════════════════
+# ══════════════════════════════════════════════
+#   WARNING TEXT
+# ══════════════════════════════════════════════
 def warn_text(n: int, name: str) -> str:
     rem = MAX_WARN - n
     if n == 1:
         return (
             f"⚠️ *WARNING {n}/{MAX_WARN}*\n\n"
-            f"Hey {name}! Gaaliyan allowed nahi hai yahan! 🚫\n"
-            f"Abhi *{rem} chances* bache hain. Sambhal ja! 😠"
+            f"Hey {name}! Gaaliyan allowed nahi! 🚫\n"
+            f"Abhi *{rem} chances* bache hain. Sambhal ja!"
         )
     if n == 2:
         return (
             f"🔴 *LAST WARNING {n}/{MAX_WARN}*\n\n"
-            f"{name}, yeh teri *AAKHRI mauka* hai! ⚠️\n"
+            f"{name}, yeh teri *AAKHRI mauka* hai!\n"
             f"Ek aur gaali = *PERMANENT BAN* 🔨"
         )
     return (
         f"🚫 *PERMANENT BAN!*\n\n"
-        f"{name}, tune *{n} baar* gaali di!\n"
-        f"Ab tu permanently ban hai is bot se! 🔨"
+        f"{name}, {n} warnings ke baad\n"
+        f"ab tu permanently ban hai! 🔨"
     )
 
-# ═══════════════════════════════════════════
-#   HELPER: get target user id
-# ═══════════════════════════════════════════
+# ══════════════════════════════════════════════
+#   HELPER — target user ID nikalna
+# ══════════════════════════════════════════════
 async def _target_id(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    # From command args: /ban 12345
     if ctx.args:
         try:
             return int(ctx.args[0])
         except ValueError:
             return None
+    # From reply to forwarded message
     if update.message.reply_to_message:
         rp  = update.message.reply_to_message
-        uid = ctx.bot_data.get(f"msg_{rp.message_id}")
+        # Check bot_data map first (most reliable)
+        uid = ctx.bot_data.get(f"uid_{rp.message_id}")
         if uid:
             return uid
+        # Fallback: parse from caption/text
         txt = rp.text or rp.caption or ""
-        m   = re.search(r"ID.*?[:`]?\s*(\d{6,12})", txt)
+        m   = re.search(r"🆔.*?`(\d{5,12})`", txt)
         if m:
             return int(m.group(1))
-        try:
-            return rp.forward_origin.sender_user.id
-        except Exception:
-            pass
+        m2  = re.search(r"ID.*?[:`]?\s*(\d{5,12})", txt)
+        if m2:
+            return int(m2.group(1))
     return None
 
-# ═══════════════════════════════════════════
+# ══════════════════════════════════════════════
 #   /start
-# ═══════════════════════════════════════════
+# ══════════════════════════════════════════════
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     u = update.effective_user
 
-    # ── ADMIN ──────────────────────────────
+    # ── Admin ──────────────────────────────────
     if u.id == ADMIN_ID:
         s = await get_stats()
         await update.message.reply_text(
-            "👑 *ADMIN PANEL — BOT IS WORKING ✅*\n\n"
-            "🟢 *Welcome to My Help Bot!*\n\n"
-            f"📊 *Live Stats:*\n"
-            f"👥 Total Users   : `{s['total']}`\n"
-            f"🟢 Online (≤5m)  : `{s['online']}`\n"
-            f"⚫ Offline        : `{s['offline']}`\n"
-            f"🚫 Banned         : `{s['banned']}`\n\n"
+            "👑 *OTPKing Solution Bot — ADMIN PANEL*\n\n"
+            "✅ *Bot sahi kaam kar raha hai!*\n\n"
+            "📊 *Live Stats:*\n"
+            f"👥 Total Users  : `{s['total']}`\n"
+            f"🟢 Online (≤5m) : `{s['online']}`\n"
+            f"⚫ Offline       : `{s['offline']}`\n"
+            f"🚫 Banned        : `{s['banned']}`\n\n"
             "📋 *Commands:*\n"
-            "/stats /users /banned\n"
-            "/ban /unban /warn /removewarn /broadcast",
+            "`/stats` — Live statistics\n"
+            "`/users` — Saare users list\n"
+            "`/banned` — Banned users\n"
+            "`/ban ID` — Ban karo\n"
+            "`/unban ID` — Unban karo\n"
+            "`/warn ID` — Warning do\n"
+            "`/removewarn ID` — Warning hatao\n"
+            "`/broadcast msg` — Sabko bhejo\n\n"
+            "💡 *User ko reply kaise karo:*\n"
+            "User ka forwarded message aayega,\n"
+            "us pe *Reply* karo → message bot se jayega!",
             parse_mode="Markdown",
         )
         return
 
-    # ── BANNED USER ─────────────────────────
+    # ── Banned user ────────────────────────────
     row = await get_user(u.id)
     if row and row.get("is_banned"):
         await update.message.reply_text(
-            "🚫 *Aap is bot se permanently ban hain!*\n"
+            "🚫 *Aap OTPKing Bot se permanently ban hain!*\n"
             "Gaaliyon ka yahi anjam hota hai. 😤",
             parse_mode="Markdown",
         )
         return
 
-    # ── SAVE USER ───────────────────────────
+    # ── Save user ──────────────────────────────
     await save_user(u)
 
-    # ── WELCOME MESSAGE ─────────────────────
+    # ── Welcome ────────────────────────────────
     kb = InlineKeyboardMarkup([[
         InlineKeyboardButton("📞 Support Bhejo", callback_data="contact"),
+        InlineKeyboardButton("ℹ️ Help", callback_data="help"),
     ]])
 
-    welcome = (
-        "🎉 *Welcome to My Help Bot!* 🎉\n\n"
-        "✅ Bot bilkul sahi kaam kar raha hai!\n\n"
-        "📩 Apna sawaal ya problem yahan bhejein,\n"
-        "hum jaldi se reply karenge!\n\n"
-        "❌ *Rules — Zaroor padho:*\n"
-        "• 🗣 Gaaliyan allowed NAHI\n"
-        "• 🔗 Links share mat karo\n"
-        "• 🎥 GIFs allowed NAHI\n\n"
-        "⚠️ Rules todne par *AUTO BAN* hoga!\n"
-        "━━━━━━━━━━━━━━━━━━━━━"
-    )
-
+    name = u.first_name or "Dost"
     await update.message.reply_text(
-        welcome,
+        f"🎉 *Welcome to OTPKing Solution Bot!* 🎉\n\n"
+        f"Namaste *{name}*! 👋\n\n"
+        f"✅ Bot bilkul sahi kaam kar raha hai!\n\n"
+        f"📩 Apna sawaal ya OTP problem yahan bhejein,\n"
+        f"hum jaldi se reply karenge!\n\n"
+        f"❌ *Rules — Zaroor padho:*\n"
+        f"• 🗣 Gaaliyan allowed NAHI — AUTO BAN\n"
+        f"• 🔗 Links share mat karo\n"
+        f"• 🎥 GIFs allowed NAHI\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"💬 Neeche button dabao ya seedha message karo!",
         parse_mode="Markdown",
         reply_markup=kb,
     )
 
-# ═══════════════════════════════════════════
-#   CALLBACK BUTTON
-# ═══════════════════════════════════════════
+# ══════════════════════════════════════════════
+#   CALLBACK BUTTONS
+# ══════════════════════════════════════════════
 async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
     if q.data == "contact":
         await q.message.reply_text(
-            "📩 *Bas apna message type karo aur bhej do!*\n"
-            "Hum jald se jald reply karenge. ✅",
+            "📩 *Apna sawaal ya problem type karo aur bhej do!*\n\n"
+            "Hum jald se jald reply karenge. ✅\n\n"
+            "⏰ Reply time: 5-15 minutes",
+            parse_mode="Markdown",
+        )
+    elif q.data == "help":
+        await q.message.reply_text(
+            "ℹ️ *OTPKing Bot Help*\n\n"
+            "• OTP problem? Message karo\n"
+            "• Service chahiye? Message karo\n"
+            "• Koi bhi sawaal? Message karo\n\n"
+            "Hum 24/7 available hain! 💪",
             parse_mode="Markdown",
         )
 
-# ═══════════════════════════════════════════
+# ══════════════════════════════════════════════
 #   /stats
-# ═══════════════════════════════════════════
+# ══════════════════════════════════════════════
 async def cmd_stats(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
     s = await get_stats()
     await update.message.reply_text(
-        "📊 *BOT STATISTICS*\n\n"
+        "📊 *OTPKing Bot — STATISTICS*\n\n"
         f"👥 Total Users    : `{s['total']}`\n"
         f"🟢 Online (≤5min) : `{s['online']}`\n"
         f"⚫ Offline         : `{s['offline']}`\n"
@@ -314,9 +337,9 @@ async def cmd_stats(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown",
     )
 
-# ═══════════════════════════════════════════
+# ══════════════════════════════════════════════
 #   /users
-# ═══════════════════════════════════════════
+# ══════════════════════════════════════════════
 async def cmd_users(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
@@ -348,80 +371,70 @@ async def cmd_users(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     s    = await get_stats()
     foot = (
-        f"\n🟢 Online: {s['online']} | "
-        f"⚫ Offline: {s['offline']} | "
-        f"🚫 Banned: {s['banned']} | "
-        f"👥 Total: {s['total']}"
+        f"\n━━━━━━━━━━━━\n"
+        f"🟢 {s['online']} | ⚫ {s['offline']} | "
+        f"🚫 {s['banned']} | 👥 {s['total']}"
     )
     body = f"👥 *ALL USERS* ({len(rows)} shown)\n\n" + "\n".join(lines) + foot
 
-    # Telegram 4096 char limit
     for i in range(0, len(body), 4000):
         await update.message.reply_text(body[i:i+4000], parse_mode="Markdown")
 
-# ═══════════════════════════════════════════
+# ══════════════════════════════════════════════
 #   /banned
-# ═══════════════════════════════════════════
+# ══════════════════════════════════════════════
 async def cmd_banned(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
     cursor = db.users.find({"is_banned": True})
     rows   = [doc async for doc in cursor]
     if not rows:
-        await update.message.reply_text(
-            "✅ Koi banned user nahi hai abhi!", parse_mode="Markdown"
-        )
+        await update.message.reply_text("✅ Koi banned user nahi!", parse_mode="Markdown")
         return
-    lines = []
-    for u in rows:
-        uname = f" @{u['username']}" if u.get("username") else ""
-        lines.append(
-            f"• `{u['user_id']}` {u.get('name','?')}{uname} ⚠️{u.get('warnings',0)}"
-        )
+    lines = [
+        f"• `{u['user_id']}` {u.get('name','?')}"
+        f"{' @'+u['username'] if u.get('username') else ''} ⚠️{u.get('warnings',0)}"
+        for u in rows
+    ]
     await update.message.reply_text(
         f"🚫 *BANNED USERS ({len(rows)})*\n\n" + "\n".join(lines),
         parse_mode="Markdown",
     )
 
-# ═══════════════════════════════════════════
+# ══════════════════════════════════════════════
 #   /ban
-# ═══════════════════════════════════════════
+# ══════════════════════════════════════════════
 async def cmd_ban(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
     tid = await _target_id(update, ctx)
     if not tid:
-        await update.message.reply_text(
-            "❌ Usage: `/ban USER_ID`", parse_mode="Markdown"
-        )
+        await update.message.reply_text("❌ `/ban USER_ID`", parse_mode="Markdown")
         return
     await db.users.update_one(
         {"user_id": tid}, {"$set": {"is_banned": True}}, upsert=True
     )
     await update.message.reply_text(
-        f"🔨 User `{tid}` BAN kar diya gaya! ✅", parse_mode="Markdown"
+        f"🔨 User `{tid}` BAN kar diya! ✅", parse_mode="Markdown"
     )
     try:
         await ctx.bot.send_message(
             tid,
-            "🚫 *Aapko is bot se BAN kar diya gaya hai!*\n"
-            "Admin ne manually ban kiya hai.",
+            "🚫 *Aapko OTPKing Bot se BAN kar diya gaya!*",
             parse_mode="Markdown",
         )
     except Exception:
         pass
 
-# ═══════════════════════════════════════════
+# ══════════════════════════════════════════════
 #   /unban
-# ═══════════════════════════════════════════
+# ══════════════════════════════════════════════
 async def cmd_unban(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
     tid = await _target_id(update, ctx)
     if not tid:
-        await update.message.reply_text(
-            "❌ Usage: `/unban USER_ID`", parse_mode="Markdown"
-        )
+        await update.message.reply_text("❌ `/unban USER_ID`", parse_mode="Markdown")
         return
     await db.users.update_one(
         {"user_id": tid},
@@ -429,30 +442,27 @@ async def cmd_unban(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         upsert=True,
     )
     await update.message.reply_text(
-        f"✅ User `{tid}` UNBAN kar diya gaya!", parse_mode="Markdown"
+        f"✅ User `{tid}` UNBAN kar diya!", parse_mode="Markdown"
     )
     try:
         await ctx.bot.send_message(
             tid,
-            "✅ *Aapka ban hataya gaya hai!*\n"
-            "Ab aap message kar sakte hain.\n"
-            "Dobara gaali mat dena! 😤",
+            "✅ *Aapka ban hataya gaya!*\n"
+            "Ab aap OTPKing Bot par message kar sakte hain.",
             parse_mode="Markdown",
         )
     except Exception:
         pass
 
-# ═══════════════════════════════════════════
+# ══════════════════════════════════════════════
 #   /warn
-# ═══════════════════════════════════════════
+# ══════════════════════════════════════════════
 async def cmd_warn(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
     tid = await _target_id(update, ctx)
     if not tid:
-        await update.message.reply_text(
-            "❌ Usage: `/warn USER_ID`", parse_mode="Markdown"
-        )
+        await update.message.reply_text("❌ `/warn USER_ID`", parse_mode="Markdown")
         return
     row = await get_user(tid) or {}
     wc  = row.get("warnings", 0) + 1
@@ -463,13 +473,10 @@ async def cmd_warn(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             upsert=True,
         )
         await update.message.reply_text(
-            f"🔨 User `{tid}` ko {wc} warnings ke baad AUTO BAN kar diya!",
-            parse_mode="Markdown",
+            f"🔨 `{tid}` — {wc} warnings → AUTO BAN!", parse_mode="Markdown"
         )
         try:
-            await ctx.bot.send_message(
-                tid, "🚫 *Ban ho gaye!*", parse_mode="Markdown"
-            )
+            await ctx.bot.send_message(tid, "🚫 *Ban ho gaye!*", parse_mode="Markdown")
         except Exception:
             pass
     else:
@@ -477,7 +484,7 @@ async def cmd_warn(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             {"user_id": tid}, {"$set": {"warnings": wc}}, upsert=True
         )
         await update.message.reply_text(
-            f"⚠️ User `{tid}` warned ({wc}/{MAX_WARN})", parse_mode="Markdown"
+            f"⚠️ `{tid}` warned ({wc}/{MAX_WARN})", parse_mode="Markdown"
         )
         try:
             await ctx.bot.send_message(
@@ -486,16 +493,16 @@ async def cmd_warn(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
-# ═══════════════════════════════════════════
+# ══════════════════════════════════════════════
 #   /removewarn
-# ═══════════════════════════════════════════
+# ══════════════════════════════════════════════
 async def cmd_removewarn(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
     tid = await _target_id(update, ctx)
     if not tid:
         await update.message.reply_text(
-            "❌ Usage: `/removewarn USER_ID`", parse_mode="Markdown"
+            "❌ `/removewarn USER_ID`", parse_mode="Markdown"
         )
         return
     row = await get_user(tid) or {}
@@ -504,18 +511,18 @@ async def cmd_removewarn(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         {"user_id": tid}, {"$set": {"warnings": wc}}, upsert=True
     )
     await update.message.reply_text(
-        f"✅ Warning remove ki! Ab `{wc}/{MAX_WARN}`", parse_mode="Markdown"
+        f"✅ Warning removed! Ab `{wc}/{MAX_WARN}`", parse_mode="Markdown"
     )
 
-# ═══════════════════════════════════════════
+# ══════════════════════════════════════════════
 #   /broadcast
-# ═══════════════════════════════════════════
+# ══════════════════════════════════════════════
 async def cmd_broadcast(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
     if not ctx.args:
         await update.message.reply_text(
-            "❌ Usage: `/broadcast Apna message yahan`",
+            "❌ `/broadcast Apna message yahan likhо`",
             parse_mode="Markdown",
         )
         return
@@ -528,8 +535,7 @@ async def cmd_broadcast(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             continue
         try:
             await ctx.bot.send_message(
-                uid,
-                f"📢 *BROADCAST*\n\n{msg}",
+                uid, f"📢 *OTPKing — ANNOUNCEMENT*\n\n{msg}",
                 parse_mode="Markdown",
             )
             sent += 1
@@ -537,60 +543,104 @@ async def cmd_broadcast(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             failed += 1
         await asyncio.sleep(0.05)
     await update.message.reply_text(
-        f"✅ Broadcast complete!\n📤 Sent: {sent} | ❌ Failed: {failed}",
+        f"✅ Broadcast done!\n📤 Sent: `{sent}` | ❌ Failed: `{failed}`",
         parse_mode="Markdown",
     )
 
-# ═══════════════════════════════════════════
-#   ADMIN REPLY → forward to user
-# ═══════════════════════════════════════════
+# ══════════════════════════════════════════════
+#   ★★★ ADMIN REPLY HANDLER ★★★
+#   Yahi woh fix hai — admin reply kare to
+#   message BOT se jata hai, personal number se NAHI
+# ══════════════════════════════════════════════
 async def admin_reply(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
     if not update.message.reply_to_message:
         return
-    mid = update.message.reply_to_message.message_id
-    tid = ctx.bot_data.get(f"msg_{mid}")
+
+    rp  = update.message.reply_to_message
+    mid = rp.message_id
+
+    # ── Get target user ID ─────────────────────
+    # Method 1: bot_data map (best — set when we forward)
+    tid = ctx.bot_data.get(f"uid_{mid}")
+
+    # Method 2: parse from message text
     if not tid:
-        await update.message.reply_text("❌ User ID nahi mila is message ke liye!")
+        txt = rp.text or rp.caption or ""
+        m   = re.search(r"🆔.*?`(\d{5,12})`", txt)
+        if m:
+            tid = int(m.group(1))
+
+    if not tid:
+        await update.message.reply_text(
+            "❌ *User ID nahi mila!*\n\n"
+            "Sirf wahi messages pe reply karo jo\n"
+            "bot ne forward kiye hain! 📩",
+            parse_mode="Markdown",
+        )
         return
+
+    # ── Send via BOT (not your number!) ────────
     try:
         m = update.message
         if m.text:
-            await ctx.bot.send_message(tid, m.text)
+            await ctx.bot.send_message(
+                chat_id=tid,
+                text=f"📬 *OTPKing Support:*\n\n{m.text}",
+                parse_mode="Markdown",
+            )
         elif m.photo:
             await ctx.bot.send_photo(
-                tid, m.photo[-1].file_id, caption=m.caption or ""
+                chat_id=tid,
+                photo=m.photo[-1].file_id,
+                caption=m.caption or "",
             )
         elif m.voice:
-            await ctx.bot.send_voice(tid, m.voice.file_id)
+            await ctx.bot.send_voice(chat_id=tid, voice=m.voice.file_id)
         elif m.video:
             await ctx.bot.send_video(
-                tid, m.video.file_id, caption=m.caption or ""
+                chat_id=tid,
+                video=m.video.file_id,
+                caption=m.caption or "",
             )
         elif m.sticker:
-            await ctx.bot.send_sticker(tid, m.sticker.file_id)
+            await ctx.bot.send_sticker(chat_id=tid, sticker=m.sticker.file_id)
         elif m.document:
             await ctx.bot.send_document(
-                tid, m.document.file_id, caption=m.caption or ""
+                chat_id=tid,
+                document=m.document.file_id,
+                caption=m.caption or "",
             )
-        c = await update.message.reply_text("✅ Reply sent!")
-        await asyncio.sleep(2)
-        await c.delete()
-    except Exception as e:
-        await update.message.reply_text(f"❌ Error: {e}")
+        elif m.audio:
+            await ctx.bot.send_audio(chat_id=tid, audio=m.audio.file_id)
 
-# ═══════════════════════════════════════════
+        # Confirm to admin
+        c = await update.message.reply_text(
+            f"✅ *Reply bhej diya!*\nUser `{tid}` ko message gaya. 📨",
+            parse_mode="Markdown",
+        )
+        await asyncio.sleep(3)
+        await c.delete()
+
+    except Exception as e:
+        await update.message.reply_text(
+            f"❌ *Reply nahi gaya!*\nError: `{e}`\n\n"
+            f"User ne bot block kiya ho sakta hai.",
+            parse_mode="Markdown",
+        )
+
+# ══════════════════════════════════════════════
 #   USER MESSAGE HANDLER
-# ═══════════════════════════════════════════
+#   ─ Har message admin ko forward karta hai
+#   ─ bot_data mein uid save karta hai reply ke liye
+# ══════════════════════════════════════════════
 async def user_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     u = update.effective_user
     if not u or u.id == ADMIN_ID:
         return
 
     ctx.bot_data["msg_count"] = ctx.bot_data.get("msg_count", 0) + 1
-
-    # Update last_seen in MongoDB
     await save_user(u)
 
     row = await get_user(u.id)
@@ -602,26 +652,25 @@ async def user_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # GIF check
+    # GIF?
     if is_gif(update):
         await update.message.reply_text(
-            "❌ *GIF allowed nahi hai is bot mein!*", parse_mode="Markdown"
+            "❌ *GIF allowed nahi hai!*", parse_mode="Markdown"
         )
         return
 
     txt = update.message.text or update.message.caption or ""
 
-    # Link check
+    # Link?
     if has_link(txt):
         await update.message.reply_text(
             "❌ *Links allowed nahi hain!*", parse_mode="Markdown"
         )
         return
 
-    # ── Abusive check ───────────────────────
+    # ── Abusive? ──────────────────────────────
     if txt and is_abusive(txt):
         wc = (row.get("warnings", 0) if row else 0) + 1
-
         if wc >= MAX_WARN:
             await db.users.update_one(
                 {"user_id": u.id},
@@ -631,9 +680,8 @@ async def user_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             note = (
                 f"🚫 *AUTO BAN!*\n"
                 f"👤 [{u.first_name}](tg://user?id={u.id})\n"
-                f"🆔 `{u.id}`\n"
-                f"⚠️ {wc}/{MAX_WARN} warnings\n"
-                f"_Unban: /unban {u.id}_"
+                f"🆔 `{u.id}`\n⚠️ {wc}/{MAX_WARN}\n"
+                f"_/unban {u.id}_"
             )
         else:
             await db.users.update_one(
@@ -644,34 +692,32 @@ async def user_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             note = (
                 f"⚠️ *GAALI DETECTED*\n"
                 f"👤 [{u.first_name}](tg://user?id={u.id})\n"
-                f"🆔 `{u.id}`\n"
-                f"⚠️ {wc}/{MAX_WARN}"
+                f"🆔 `{u.id}`\n⚠️ {wc}/{MAX_WARN}"
             )
-
         try:
             await ctx.bot.send_message(ADMIN_ID, note, parse_mode="Markdown")
         except Exception:
             pass
-
         await update.message.reply_text(
             warn_text(wc, u.first_name or "Bhai"), parse_mode="Markdown"
         )
         return
 
-    # ── Forward to admin ────────────────────
+    # ── Forward to admin ──────────────────────
     try:
         warn_count = row.get("warnings", 0) if row else 0
         header = (
-            f"📩 *NEW MESSAGE*\n"
+            f"📩 *NEW MESSAGE — OTPKing Bot*\n"
             f"👤 [{u.first_name}](tg://user?id={u.id})\n"
             f"🆔 `{u.id}`"
         )
         if u.username:
             header += f"\n📛 @{u.username}"
-        header += f"\n⚠️ {warn_count}/{MAX_WARN}\n━━━━━━━━━━━━\n"
+        header += f"\n⚠️ Warnings: {warn_count}/{MAX_WARN}\n━━━━━━━━━━━━\n"
 
         fwd = None
         m   = update.message
+
         if m.text:
             fwd = await ctx.bot.send_message(
                 ADMIN_ID, header + m.text, parse_mode="Markdown"
@@ -711,39 +757,42 @@ async def user_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 parse_mode="Markdown",
             )
 
+        # ★ CRITICAL: Save user ID mapped to forwarded message ID
+        # Yahi se admin reply karne pe sahi user ko message jata hai
         if fwd:
-            ctx.bot_data[f"msg_{fwd.message_id}"] = u.id
+            ctx.bot_data[f"uid_{fwd.message_id}"] = u.id
+            log.info(f"Mapped msg {fwd.message_id} → user {u.id}")
 
-        c = await update.message.reply_text("MESSAGE SEND ✅")
-        await asyncio.sleep(2)
+        # Ack to user
+        c = await update.message.reply_text("✅ *Message mila! Jaldi reply milega.* 📨", parse_mode="Markdown")
+        await asyncio.sleep(3)
         await c.delete()
 
     except Exception as e:
         log.error(f"Forward error: {e}")
-        await update.message.reply_text("MESSAGE SEND ✅")
+        await update.message.reply_text("✅ Message mila! Jaldi reply milega.")
 
-# ═══════════════════════════════════════════
-#   POST INIT — runs after bot connects
-# ═══════════════════════════════════════════
+# ══════════════════════════════════════════════
+#   POST INIT
+# ══════════════════════════════════════════════
 async def post_init(app: Application):
     await init_db()
-    # Set bot command menu
     await app.bot.set_my_commands([
-        BotCommand("start",       "Bot start karo"),
-        BotCommand("stats",       "Statistics dekho (Admin)"),
-        BotCommand("users",       "Saare users dekho (Admin)"),
-        BotCommand("banned",      "Banned list (Admin)"),
-        BotCommand("ban",         "User ban karo (Admin)"),
-        BotCommand("unban",       "User unban karo (Admin)"),
-        BotCommand("warn",        "Warning do (Admin)"),
-        BotCommand("removewarn",  "Warning hatao (Admin)"),
-        BotCommand("broadcast",   "Sabko message bhejo (Admin)"),
+        BotCommand("start",      "OTPKing Bot start karo"),
+        BotCommand("stats",      "Statistics (Admin)"),
+        BotCommand("users",      "User list (Admin)"),
+        BotCommand("banned",     "Banned list (Admin)"),
+        BotCommand("ban",        "Ban karo (Admin)"),
+        BotCommand("unban",      "Unban karo (Admin)"),
+        BotCommand("warn",       "Warning do (Admin)"),
+        BotCommand("removewarn", "Warning hatao (Admin)"),
+        BotCommand("broadcast",  "Broadcast (Admin)"),
     ])
-    log.info(f"🚀 Bot ready! Admin ID: {ADMIN_ID}")
+    log.info(f"🚀 OTPKing Bot ready! Admin: {ADMIN_ID}")
 
-# ═══════════════════════════════════════════
+# ══════════════════════════════════════════════
 #   MAIN
-# ═══════════════════════════════════════════
+# ══════════════════════════════════════════════
 def main():
     app = (
         Application.builder()
@@ -752,7 +801,6 @@ def main():
         .build()
     )
 
-    # Commands
     app.add_handler(CommandHandler("start",       cmd_start))
     app.add_handler(CommandHandler("stats",       cmd_stats))
     app.add_handler(CommandHandler("users",       cmd_users))
@@ -762,11 +810,9 @@ def main():
     app.add_handler(CommandHandler("warn",        cmd_warn))
     app.add_handler(CommandHandler("removewarn",  cmd_removewarn))
     app.add_handler(CommandHandler("broadcast",   cmd_broadcast))
-
-    # Inline buttons
     app.add_handler(CallbackQueryHandler(on_button))
 
-    # Admin reply (must be before user_msg)
+    # ★ Admin reply — MUST be before user_msg handler
     app.add_handler(MessageHandler(
         filters.User(ADMIN_ID) & filters.REPLY & ~filters.COMMAND,
         admin_reply,
